@@ -1,39 +1,95 @@
 <script type="text/babel">
-// voice — 音声入力モーダル (Web Speech API → Gemini AI 解析 → ローカル正規表現フォールバック)
+// voice — 音声入力モーダル
+// マイク権限は GAS の iframe 内では取れないので、別ウィンドウ (window.open)
+// で SpeechRecognition を回し、結果は postMessage で親に戻す方式。
+// 既知パターン (cf. AI-Calendar)。
+
+const VOICE_MSG_TYPE = 'mybudget_voice_result';
+
+const VOICE_POPUP_HTML =
+'<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
+'<meta name="viewport" content="width=device-width, initial-scale=1">' +
+'<title>音声入力</title><style>' +
+'*{box-sizing:border-box;margin:0;padding:0}' +
+'body{font-family:"Hiragino Sans","Yu Gothic","Meiryo",sans-serif;background:#fafaf7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}' +
+'h2{color:#1a1a1a;margin-bottom:14px;font-size:16px;font-weight:600}' +
+'.mic-btn{width:80px;height:80px;border-radius:50%;border:none;background:#1a1a1a;color:#fff;font-size:32px;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,0.18);transition:all .2s}' +
+'.mic-btn:hover{transform:scale(1.05)}' +
+'.mic-btn.recording{background:#c0392b;animation:pulse 1s infinite}' +
+'@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}' +
+'.status{margin-top:12px;font-size:13px;color:#666;text-align:center;min-height:18px}' +
+'.error{color:#c0392b;margin-top:6px;font-size:12px;text-align:center;min-height:16px}' +
+'.area{width:100%;max-width:380px;margin-top:14px}' +
+'textarea{width:100%;min-height:100px;border:1px solid rgba(0,0,0,0.15);border-radius:12px;padding:12px;font-size:15px;font-family:inherit;resize:vertical;outline:none}' +
+'textarea:focus{border-color:#1a1a1a}' +
+'.row{display:flex;gap:8px;margin-top:12px;width:100%;max-width:380px}' +
+'.btn{flex:1;padding:12px;border:none;border-radius:10px;font-size:14.5px;font-weight:600;cursor:pointer}' +
+'.send{background:#1a1a1a;color:#fff}' +
+'.cancel{background:#f1f0ec;color:#333}' +
+'</style></head><body>' +
+'<h2>音声入力 🍀</h2>' +
+'<button class="mic-btn" id="m">🎤</button>' +
+'<div class="status" id="s">タップして話してください</div>' +
+'<div class="error" id="e"></div>' +
+'<div class="area"><textarea id="t" placeholder="例: 楽天カードに 12000円"></textarea></div>' +
+'<div class="row"><button class="btn cancel" id="c">キャンセル</button><button class="btn send" id="g">解析する</button></div>' +
+'<script>' +
+'var m=document.getElementById("m"),s=document.getElementById("s"),e=document.getElementById("e"),t=document.getElementById("t"),g=document.getElementById("g"),c=document.getElementById("c");' +
+'var rec=null,rec_on=false,buf="";' +
+'var SR=window.SpeechRecognition||window.webkitSpeechRecognition;' +
+'if(!SR){s.textContent="";e.textContent="このブラウザは音声認識非対応。テキストを直接入力できます。";m.disabled=true;}' +
+'m.addEventListener("click",function(){rec_on?stopR():startR();});' +
+'g.addEventListener("click",function(){var v=t.value.trim();if(!v){e.textContent="テキストが空です";return;}if(window.opener)window.opener.postMessage({type:"' + VOICE_MSG_TYPE + '",text:v},"*");window.close();});' +
+'c.addEventListener("click",function(){if(rec)try{rec.abort();}catch(_){};window.close();});' +
+'function startR(){e.textContent="";buf="";t.value="";rec=new SR();rec.lang="ja-JP";rec.continuous=true;rec.interimResults=true;' +
+'rec.onstart=function(){rec_on=true;m.classList.add("recording");m.textContent="⏹";s.textContent="🎤 録音中…タップで停止";};' +
+'rec.onresult=function(ev){var ip="",fn="";for(var i=ev.resultIndex;i<ev.results.length;i++){var x=ev.results[i][0].transcript;if(ev.results[i].isFinal)fn+=x;else ip+=x;}if(fn)buf+=fn;t.value=buf+ip;};' +
+'rec.onerror=function(ev){console.error("Speech error:",ev.error);if(ev.error==="not-allowed")e.textContent="マイクの使用が許可されていません。アドレスバー左の鍵アイコンから許可してください。";else if(ev.error==="no-speech")e.textContent="音声が検出されませんでした";else if(ev.error!=="aborted")e.textContent="音声認識エラー: "+ev.error;stopR();};' +
+'rec.onend=function(){if(rec_on)stopR();};' +
+'try{rec.start();}catch(ex){e.textContent="音声入力の開始に失敗: "+ex.message;stopR();}}' +
+'function stopR(){rec_on=false;m.classList.remove("recording");m.textContent="🎤";if(rec){try{rec.stop();}catch(_){};rec=null;}if(t.value.trim())s.textContent="編集して「解析する」を押してください";else s.textContent="タップして話してください";}' +
+'if(SR)setTimeout(function(){startR();},400);' +
+'<\/script></body></html>';
 
 function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
-  const [listening, setListening] = React.useState(false);
   const [transcript, setTranscript] = React.useState('');
   const [analyzing, setAnalyzing] = React.useState(false);
   const [parsed, setParsed] = React.useState(null);
-  const [kind, setKind] = React.useState('expenses'); // 'expenses' or 'incomes'
-  const [matchedItem, setMatchedItem] = React.useState(null); // { id, name, amount } or null
+  const [kind, setKind] = React.useState('expenses');
+  const [matchedItem, setMatchedItem] = React.useState(null);
   const [aiNotice, setAiNotice] = React.useState('');
   const [manualText, setManualText] = React.useState('');
-  const recogRef = React.useRef(null);
-  const supported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  const popupRef = React.useRef(null);
   const hasGAS = typeof google !== 'undefined' && google.script && google.script.run;
 
   React.useEffect(() => {
     if (!open) {
-      setListening(false); setTranscript(''); setParsed(null);
-      setAnalyzing(false); setMatchedItem(null); setAiNotice('');
-      setManualText('');
-      if (recogRef.current) try { recogRef.current.stop(); } catch (e) {}
+      setTranscript(''); setParsed(null); setAnalyzing(false);
+      setMatchedItem(null); setAiNotice(''); setManualText('');
+      if (popupRef.current && !popupRef.current.closed) {
+        try { popupRef.current.close(); } catch (e) {}
+      }
+      popupRef.current = null;
     }
   }, [open]);
 
-  const submitManual = () => {
-    const t = manualText.trim();
-    if (!t) return;
-    setTranscript(t);
-    analyze(t);
-  };
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (event) => {
+      if (!event.data || event.data.type !== VOICE_MSG_TYPE) return;
+      const text = (event.data.text || '').trim();
+      if (!text) return;
+      setTranscript(text);
+      analyze(text);
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+    // eslint-disable-next-line
+  }, [open, budget]);
 
   const findItem = (k, id) => {
     if (!budget || !id) return null;
-    const list = budget[k] || [];
-    return list.find(r => r.id === id) || null;
+    return (budget[k] || []).find(r => r.id === id) || null;
   };
 
   const fallbackLocal = (text, note) => {
@@ -90,66 +146,34 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
       .analyzeUtterance({ text, expenses, incomes });
   };
 
-  const start = () => {
+  const openPopup = () => {
     setTranscript(''); setParsed(null); setMatchedItem(null); setAiNotice('');
-
-    if (!supported) {
-      setAiNotice('このブラウザは音声認識非対応です。下の「直接入力」をご利用ください');
+    if (popupRef.current && !popupRef.current.closed) {
+      try { popupRef.current.focus(); } catch (e) {}
       return;
     }
-
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let r;
-    try { r = new Rec(); }
-    catch (e) {
-      console.error('SpeechRecognition ctor failed', e);
-      setAiNotice('音声認識を初期化できません。下の「直接入力」をご利用ください');
-      return;
-    }
-    r.lang = 'ja-JP';
-    r.interimResults = true;
-    r.continuous = false;
-    r.onstart = () => setListening(true);
-    r.onresult = (e) => {
-      let txt = '';
-      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
-      setTranscript(txt);
-      if (e.results[e.results.length - 1].isFinal) {
-        setListening(false);
-        analyze(txt);
-      }
-    };
-    r.onerror = (e) => {
-      console.error('SpeechRecognition error', e.error, e.message);
-      setListening(false);
-      const code = e.error || '';
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        setAiNotice('マイク権限が拒否されました。ブラウザ設定で許可するか、下の「直接入力」をご利用ください');
-      } else if (code === 'no-speech') {
-        setAiNotice('音声が検出されませんでした');
-      } else if (code === 'audio-capture') {
-        setAiNotice('マイクが見つかりません');
-      } else if (code === 'network') {
-        setAiNotice('音声認識ネットワークエラー');
-      } else if (code && code !== 'aborted') {
-        setAiNotice('音声認識エラー: ' + code);
-      }
-    };
-    r.onend = () => setListening(false);
-    recogRef.current = r;
+    let popup;
     try {
-      r.start();
-      setListening(true); // onstart 待ちが遅い端末向けの楽観更新
+      popup = window.open('', 'mybudget_voice_input', 'width=420,height=560,scrollbars=no,resizable=yes');
     } catch (e) {
-      console.error('SpeechRecognition.start() failed', e);
-      setAiNotice('音声認識を起動できません: ' + (e.message || e) + '。下の「直接入力」をご利用ください');
+      setAiNotice('音声ウィンドウを開けません — 直接入力をご利用ください');
+      return;
     }
+    if (!popup) {
+      setAiNotice('ポップアップがブロックされました — 直接入力をご利用ください');
+      return;
+    }
+    popup.document.open();
+    popup.document.write(VOICE_POPUP_HTML);
+    popup.document.close();
+    popupRef.current = popup;
   };
 
-  const stop = () => {
-    if (recogRef.current) try { recogRef.current.stop(); } catch (e) {}
-    setListening(false);
-    if (transcript) analyze(transcript);
+  const submitManual = () => {
+    const t = manualText.trim();
+    if (!t) return;
+    setTranscript(t);
+    analyze(t);
   };
 
   const confirm = () => {
@@ -175,7 +199,6 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
         animation: 'slideUp 240ms cubic-bezier(0.2, 0.8, 0.2, 1)',
       }}>
         <style>{`@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-          @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
           @keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
         <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.15)', margin: '0 auto 12px' }}></div>
@@ -206,18 +229,39 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
           })}
         </div>
 
-        <div style={{
-          minHeight: 72, padding: '14px 16px',
-          background: '#fff', borderRadius: 12, border: '0.5px solid rgba(0,0,0,0.06)',
-          fontSize: 16, color: transcript ? '#1a1a1a' : '#bbb', marginBottom: 12,
+        <button onClick={openPopup} disabled={analyzing} style={{
+          all: 'unset', cursor: analyzing ? 'default' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          width: '100%', boxSizing: 'border-box',
+          padding: '14px 16px', fontSize: 15, fontWeight: 600,
+          color: '#fff', background: '#1a1a1a', borderRadius: 12,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+          opacity: analyzing ? 0.5 : 1,
         }}>
-          {transcript || (listening ? '聞いています…' : 'マイクをタップして話してください')}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="3" width="6" height="12" rx="3" fill="#fff"/>
+            <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+          </svg>
+          音声入力（別ウィンドウで開く）
+        </button>
+        <div style={{ fontSize: 10.5, color: '#aaa', marginTop: 6, textAlign: 'center' }}>
+          別ウィンドウでマイク権限を許可してください
         </div>
+
+        {transcript && (
+          <div style={{
+            marginTop: 14, padding: '10px 14px',
+            background: '#fff', borderRadius: 10, border: '0.5px solid rgba(0,0,0,0.06)',
+            fontSize: 13.5, color: '#333',
+          }}>
+            「{transcript}」
+          </div>
+        )}
 
         {analyzing && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
-            padding: '12px 16px', marginBottom: 12,
+            padding: '12px 16px', marginTop: 12,
             background: '#fff', borderRadius: 12, border: '0.5px solid rgba(0,0,0,0.06)',
             fontSize: 13, color: '#666',
           }}>
@@ -234,7 +278,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
           <div style={{
             background: '#fff', borderRadius: 12, padding: '12px 16px',
             border: matchedItem ? `1.5px solid ${accent}` : `1px solid ${accent}55`,
-            marginBottom: 12,
+            marginTop: 12,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 18 }}>{kind === 'incomes' ? '💰' : '💸'}</div>
@@ -263,29 +307,21 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 0 4px' }}>
-          <button onClick={listening ? stop : start} disabled={analyzing} style={{
-            all: 'unset', cursor: analyzing ? 'default' : 'pointer',
-            width: 68, height: 68, borderRadius: 999,
-            background: listening ? '#c0392b' : (analyzing ? '#888' : '#1a1a1a'),
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: listening ? `0 0 0 8px ${accent}33` : '0 6px 18px rgba(0,0,0,0.18)',
-            animation: listening ? 'pulse 1.2s ease-in-out infinite' : 'none',
-            transition: 'background 200ms ease',
-            opacity: analyzing ? 0.6 : 1,
+        {parsed && !analyzing && (
+          <button onClick={confirm} style={{
+            all: 'unset', cursor: 'pointer', display: 'block', boxSizing: 'border-box',
+            width: '100%', textAlign: 'center', marginTop: 14,
+            padding: '13px 0', fontSize: 14.5, fontWeight: 600,
+            color: '#fff', background: accent, borderRadius: 12,
           }}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-              <rect x="9" y="3" width="6" height="12" rx="3" fill="#fff"/>
-              <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
-            </svg>
+            {matchedItem
+              ? `「${matchedItem.name}」を ${formatYen(parsed.amount)} に上書き`
+              : (kind === 'incomes' ? '収入に追加' : '支出に追加')}
           </button>
-        </div>
-        <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#999' }}>
-          {listening ? 'タップで停止' : (supported ? 'タップして話す' : '音声認識非対応 — 直接入力をご利用ください')}
-        </div>
+        )}
 
         <div style={{
-          marginTop: 14, paddingTop: 12,
+          marginTop: 18, paddingTop: 12,
           borderTop: '0.5px solid rgba(0,0,0,0.06)',
         }}>
           <div style={{ fontSize: 10.5, color: '#999', marginBottom: 6, letterSpacing: 0.4 }}>
@@ -298,7 +334,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
               onChange={e => setManualText(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') submitManual(); }}
               placeholder="例: 楽天カードに 12000円"
-              disabled={analyzing || listening}
+              disabled={analyzing}
               style={{
                 flex: 1, boxSizing: 'border-box',
                 padding: '10px 12px', fontSize: 14,
@@ -307,27 +343,14 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
                 fontFamily: 'inherit',
               }}
             />
-            <button onClick={submitManual} disabled={analyzing || listening || !manualText.trim()} style={{
-              all: 'unset', cursor: (analyzing || listening || !manualText.trim()) ? 'default' : 'pointer',
+            <button onClick={submitManual} disabled={analyzing || !manualText.trim()} style={{
+              all: 'unset', cursor: (analyzing || !manualText.trim()) ? 'default' : 'pointer',
               padding: '10px 14px', fontSize: 13, fontWeight: 600,
               color: '#fff', background: accent, borderRadius: 10,
-              opacity: (analyzing || listening || !manualText.trim()) ? 0.4 : 1,
+              opacity: (analyzing || !manualText.trim()) ? 0.4 : 1,
             }}>解析</button>
           </div>
         </div>
-
-        {parsed && !analyzing && (
-          <button onClick={confirm} style={{
-            all: 'unset', cursor: 'pointer', display: 'block', boxSizing: 'border-box',
-            width: '100%', textAlign: 'center', marginTop: 14,
-            padding: '13px 0', fontSize: 14.5, fontWeight: 600,
-            color: '#fff', background: '#1a1a1a', borderRadius: 12,
-          }}>
-            {matchedItem
-              ? `「${matchedItem.name}」を ${formatYen(parsed.amount)} に上書き`
-              : (kind === 'incomes' ? '収入に追加' : '支出に追加')}
-          </button>
-        )}
       </div>
     </div>
   );
