@@ -1223,8 +1223,8 @@ function App() {
     setBudgets({
       ...budgets,
       [next]: {
-        expenses: template.expenses.map(r => ({ ...r, amount: 0 })),
-        incomes: template.incomes.map(r => ({ ...r, amount: 0 })),
+        expenses: template.expenses.map(r => ({ ...r })),
+        incomes: template.incomes.map(r => ({ ...r })),
       },
     });
     setCurrentMonth(next);
