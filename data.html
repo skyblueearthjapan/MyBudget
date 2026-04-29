@@ -1,0 +1,154 @@
+<script>
+  // データ永続化ブリッジ — GAS の PropertiesService に JSON を保存。
+  // 失敗時は localStorage にフォールバック。
+  window.MyBudgetStorage = (function () {
+    const LS_KEY = 'mybudget_v1';
+    const hasGAS = typeof google !== 'undefined' && google.script && google.script.run;
+
+    function load() {
+      return new Promise((resolve) => {
+        if (!hasGAS) {
+          try {
+            const raw = localStorage.getItem(LS_KEY);
+            return resolve(raw ? JSON.parse(raw) : null);
+          } catch (e) { return resolve(null); }
+        }
+        google.script.run
+          .withSuccessHandler((s) => {
+            if (!s) {
+              try {
+                const raw = localStorage.getItem(LS_KEY);
+                return resolve(raw ? JSON.parse(raw) : null);
+              } catch (e) { return resolve(null); }
+            }
+            try { resolve(JSON.parse(s)); } catch (e) { resolve(null); }
+          })
+          .withFailureHandler(() => {
+            try {
+              const raw = localStorage.getItem(LS_KEY);
+              resolve(raw ? JSON.parse(raw) : null);
+            } catch (e) { resolve(null); }
+          })
+          .getBudgets();
+      });
+    }
+
+    function save(data) {
+      const json = JSON.stringify(data);
+      try { localStorage.setItem(LS_KEY, json); } catch (e) {}
+      if (!hasGAS) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        google.script.run
+          .withSuccessHandler(() => resolve(true))
+          .withFailureHandler(() => resolve(false))
+          .saveBudgets(json);
+      });
+    }
+
+    return { load, save };
+  })();
+</script>
+
+<script type="text/babel">
+// data — sample budget data + helpers
+// 4月のデータからスタート、ユーザーが月を増やせる前提
+
+const INITIAL_BUDGETS = {
+  '2026-04': {
+    expenses: [
+      { id: 'e1',  name: 'au自分銀行',  amount: 24000,   due: '4/10' },
+      { id: 'e2',  name: '楽天カード',  amount: 169759,  due: '' },
+      { id: 'e3',  name: 'JCBカード',   amount: 68671,   due: '' },
+      { id: 'e4',  name: 'ケータイ',    amount: 11402,   due: '10/10' },
+      { id: 'e5',  name: '駐車場代',    amount: 5000,    due: '' },
+      { id: 'e6',  name: '奨学金',      amount: 15000,   due: '' },
+      { id: 'e7',  name: '金',          amount: 3000,    due: '' },
+      { id: 'e8',  name: '県民共済',    amount: 4000,    due: '' },
+      { id: 'e9',  name: 'ベル',        amount: 164800,  due: '' },
+      { id: 'e10', name: '仁ちゃん',    amount: 220000,  due: '' },
+      { id: 'e11', name: '生活費',      amount: 50000,   due: '' },
+      { id: 'e12', name: '母親',        amount: 15000,   due: '' },
+    ],
+    incomes: [
+      { id: 'i1', name: '給料',         amount: 530000, due: '' },
+      { id: 'i2', name: '個人事業収入', amount: 165000, due: '' },
+    ],
+  },
+  '2026-03': {
+    expenses: [
+      { id: 'e1', name: 'au自分銀行',  amount: 24000,  due: '3/10' },
+      { id: 'e2', name: '楽天カード',  amount: 142300, due: '' },
+      { id: 'e3', name: 'JCBカード',   amount: 71500,  due: '' },
+      { id: 'e4', name: 'ケータイ',    amount: 11402,  due: '' },
+      { id: 'e5', name: '駐車場代',    amount: 5000,   due: '' },
+      { id: 'e6', name: '奨学金',      amount: 15000,  due: '' },
+      { id: 'e7', name: '金',          amount: 3000,   due: '' },
+      { id: 'e8', name: '県民共済',    amount: 4000,   due: '' },
+      { id: 'e9', name: 'ベル',        amount: 164800, due: '' },
+      { id: 'e10', name: '仁ちゃん',   amount: 220000, due: '' },
+      { id: 'e11', name: '生活費',     amount: 48000,  due: '' },
+      { id: 'e12', name: '母親',       amount: 15000,  due: '' },
+    ],
+    incomes: [
+      { id: 'i1', name: '給料',         amount: 530000, due: '' },
+      { id: 'i2', name: '個人事業収入', amount: 142000, due: '' },
+    ],
+  },
+  '2026-02': {
+    expenses: [
+      { id: 'e1', name: 'au自分銀行',  amount: 24000,  due: '' },
+      { id: 'e2', name: '楽天カード',  amount: 188400, due: '' },
+      { id: 'e3', name: 'JCBカード',   amount: 55200,  due: '' },
+      { id: 'e4', name: 'ケータイ',    amount: 11402,  due: '' },
+      { id: 'e5', name: '駐車場代',    amount: 5000,   due: '' },
+      { id: 'e6', name: '奨学金',      amount: 15000,  due: '' },
+      { id: 'e7', name: '金',          amount: 3000,   due: '' },
+      { id: 'e8', name: '県民共済',    amount: 4000,   due: '' },
+      { id: 'e9', name: 'ベル',        amount: 164800, due: '' },
+      { id: 'e10', name: '仁ちゃん',   amount: 220000, due: '' },
+      { id: 'e11', name: '生活費',     amount: 52000,  due: '' },
+      { id: 'e12', name: '母親',       amount: 15000,  due: '' },
+    ],
+    incomes: [
+      { id: 'i1', name: '給料',         amount: 530000, due: '' },
+      { id: 'i2', name: '個人事業収入', amount: 178000, due: '' },
+    ],
+  },
+};
+
+const formatYen = (n) => '¥' + Math.round(n).toLocaleString('en-US');
+const formatYenSigned = (n) => (n >= 0 ? '+' : '−') + '¥' + Math.abs(Math.round(n)).toLocaleString('en-US');
+
+const monthLabel = (key) => {
+  const [y, m] = key.split('-');
+  return `${y}年${parseInt(m, 10)}月`;
+};
+const monthShort = (key) => {
+  const m = parseInt(key.split('-')[1], 10);
+  return `${m}月`;
+};
+
+const sumAmounts = (rows) => rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+
+const sortedMonthKeys = (budgets) => Object.keys(budgets).sort();
+
+const nextMonthKey = (key) => {
+  const [y, m] = key.split('-').map(Number);
+  const d = new Date(y, m, 1);
+  const ny = d.getFullYear();
+  const nm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${ny}-${nm}`;
+};
+
+const currentMonthKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+Object.assign(window, {
+  INITIAL_BUDGETS,
+  formatYen, formatYenSigned,
+  monthLabel, monthShort,
+  sumAmounts, sortedMonthKeys, nextMonthKey, currentMonthKey,
+});
+</script>

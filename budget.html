@@ -1,0 +1,259 @@
+<script type="text/babel">
+// budget — 月次の家計簿一覧画面（タップでインライン編集）
+
+function EditableRow({ row, onChange, onDelete, accent, showDueDate, compact }) {
+  const [open, setOpen] = React.useState(false);
+  const [draft, setDraft] = React.useState(row);
+  const nameRef = React.useRef(null);
+
+  React.useEffect(() => { setDraft(row); }, [row.id, row.name, row.amount, row.due]);
+
+  const commit = () => {
+    onChange({ ...draft, amount: Number(String(draft.amount).replace(/[^\d.-]/g, '')) || 0 });
+    setOpen(false);
+  };
+  const cancel = () => { setDraft(row); setOpen(false); };
+
+  return (
+    <div style={{
+      borderBottom: '0.5px solid rgba(0,0,0,0.06)',
+      background: open ? 'rgba(0,0,0,0.015)' : 'transparent',
+      transition: 'background 120ms ease',
+    }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          all: 'unset', boxSizing: 'border-box', cursor: 'pointer',
+          width: '100%', display: 'flex', alignItems: 'center',
+          padding: compact ? '10px 18px' : '14px 18px', gap: 12,
+        }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 15.5, fontWeight: 500, color: '#1a1a1a',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{row.name || <span style={{ color: '#aaa' }}>名称未設定</span>}</div>
+          {row.due && showDueDate ? (
+            <div style={{
+              marginTop: 2, fontSize: 11.5, color: '#888',
+              fontVariantNumeric: 'tabular-nums', letterSpacing: 0.2,
+            }}>支払日 {row.due}</div>
+          ) : null}
+        </div>
+        <div style={{
+          fontSize: 16, fontWeight: 500, color: '#1a1a1a',
+          fontVariantNumeric: 'tabular-nums', letterSpacing: -0.3,
+        }}>{formatYen(row.amount)}</div>
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{
+          opacity: 0.35, transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 160ms ease',
+        }}>
+          <path d="M3 1l4 4-4 4" stroke="#1a1a1a" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{ padding: '4px 18px 16px', display: 'grid', gap: 10 }}>
+          <Field label="項目名">
+            <input
+              ref={nameRef}
+              value={draft.name}
+              onChange={e => setDraft({ ...draft, name: e.target.value })}
+              placeholder="例：楽天カード"
+              style={inputStyle}
+            />
+          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 10 }}>
+            <Field label="金額（円）">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={draft.amount}
+                onChange={e => setDraft({ ...draft, amount: e.target.value })}
+                style={{ ...inputStyle, fontVariantNumeric: 'tabular-nums' }}
+              />
+            </Field>
+            <Field label="支払日">
+              <input
+                value={draft.due}
+                onChange={e => setDraft({ ...draft, due: e.target.value })}
+                placeholder="4/10"
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={commit} style={{
+              ...btnStyle, background: accent, color: '#fff',
+            }}>保存</button>
+            <button onClick={cancel} style={{
+              ...btnStyle, background: '#f1f0ec', color: '#333',
+            }}>キャンセル</button>
+            <div style={{ flex: 1 }}></div>
+            <button onClick={() => onDelete(row.id)} style={{
+              ...btnStyle, background: 'transparent', color: '#c44',
+              border: '1px solid rgba(196,68,68,0.25)',
+            }}>削除</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={{ display: 'block' }}>
+      <div style={{ fontSize: 11, color: '#888', marginBottom: 4, letterSpacing: 0.4 }}>{label}</div>
+      {children}
+    </label>
+  );
+}
+
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box',
+  padding: '10px 12px', fontSize: 15,
+  border: '1px solid rgba(0,0,0,0.1)', borderRadius: 10,
+  background: '#fff', color: '#1a1a1a', outline: 'none',
+  fontFamily: 'inherit',
+};
+
+const btnStyle = {
+  all: 'unset', cursor: 'pointer',
+  padding: '9px 14px', fontSize: 13.5, fontWeight: 500,
+  borderRadius: 10, textAlign: 'center',
+};
+
+function SectionHeader({ label, total, accent, onAdd }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'baseline',
+      padding: '24px 18px 10px', gap: 10,
+    }}>
+      <div style={{
+        fontSize: 11, fontWeight: 600, letterSpacing: 1.4,
+        color: '#888', textTransform: 'uppercase',
+        display: 'flex', alignItems: 'center', gap: 6,
+        whiteSpace: 'nowrap', flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 13 }}>{label === '支出' ? '💸' : '💰'}</span>
+        {label}
+      </div>
+      <div style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.07)', alignSelf: 'center' }}></div>
+      <div style={{
+        fontSize: 13.5, fontWeight: 500, color: accent,
+        fontVariantNumeric: 'tabular-nums', letterSpacing: -0.2,
+      }}>{formatYen(total)}</div>
+      <button onClick={onAdd} aria-label="追加" style={{
+        all: 'unset', cursor: 'pointer',
+        width: 22, height: 22, borderRadius: 11,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.04)', color: '#666',
+      }}>
+        <svg width="11" height="11" viewBox="0 0 11 11">
+          <path d="M5.5 1v9M1 5.5h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function BudgetScreen({ budget, onUpdate, accent, showDueDate, compact }) {
+  const expTotal = sumAmounts(budget.expenses);
+  const incTotal = sumAmounts(budget.incomes);
+  const balance = incTotal - expTotal;
+  const isDeficit = balance < 0;
+
+  const updateRow = (kind, row) => {
+    const list = budget[kind].map(r => r.id === row.id ? row : r);
+    onUpdate({ ...budget, [kind]: list });
+  };
+  const deleteRow = (kind, id) => {
+    onUpdate({ ...budget, [kind]: budget[kind].filter(r => r.id !== id) });
+  };
+  const addRow = (kind) => {
+    const id = kind[0] + '_' + Date.now();
+    const newRow = { id, name: '', amount: 0, due: '' };
+    onUpdate({ ...budget, [kind]: [...budget[kind], newRow] });
+  };
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <div style={{ padding: '16px 18px 8px' }}>
+        <div style={{
+          background: '#fff', borderRadius: 18, padding: '20px 20px 18px',
+          boxShadow: '0 1px 0 rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.04)',
+          border: '0.5px solid rgba(0,0,0,0.05)',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{ fontSize: 11, color: '#888', letterSpacing: 1.6, fontWeight: 600 }}>収支</div>
+            <div style={{ fontSize: 18 }}>{isDeficit ? '🍀' : '💰'}</div>
+          </div>
+          <div style={{
+            marginTop: 6, fontSize: 38, fontWeight: 300, letterSpacing: -1.4,
+            color: isDeficit ? '#c0392b' : '#2d6a4f',
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {formatYenSigned(balance)}
+          </div>
+          <div style={{
+            marginTop: 4, fontSize: 12, color: '#999',
+            display: 'flex', gap: 14, alignItems: 'baseline',
+          }}>
+            <span>{isDeficit ? '赤字' : '黒字'}</span>
+            <span style={{ width: 1, height: 10, background: 'rgba(0,0,0,0.1)' }}></span>
+            <span>収入 {formatYen(incTotal)}</span>
+            <span>支出 {formatYen(expTotal)}</span>
+          </div>
+
+          <div style={{ marginTop: 14, height: 4, borderRadius: 2, background: '#f1efe9', overflow: 'hidden', display: 'flex' }}>
+            <div style={{
+              width: `${Math.min(100, (Math.min(incTotal, expTotal) / Math.max(incTotal, expTotal, 1)) * 100)}%`,
+              background: '#2d6a4f',
+            }}></div>
+            <div style={{
+              flex: 1,
+              background: isDeficit ? '#c0392b' : 'transparent',
+            }}></div>
+          </div>
+        </div>
+      </div>
+
+      <SectionHeader label="支出" total={expTotal} accent="#c0392b" onAdd={() => addRow('expenses')} />
+      <div style={{ background: '#fff', margin: '0 18px', borderRadius: 14, overflow: 'hidden', border: '0.5px solid rgba(0,0,0,0.05)' }}>
+        {budget.expenses.map(r => (
+          <EditableRow key={r.id} row={r} accent={accent}
+            showDueDate={showDueDate} compact={compact}
+            onChange={row => updateRow('expenses', row)}
+            onDelete={id => deleteRow('expenses', id)} />
+        ))}
+        {budget.expenses.length === 0 && <EmptyHint label="支出を追加" />}
+      </div>
+
+      <SectionHeader label="収入" total={incTotal} accent="#2d6a4f" onAdd={() => addRow('incomes')} />
+      <div style={{ background: '#fff', margin: '0 18px', borderRadius: 14, overflow: 'hidden', border: '0.5px solid rgba(0,0,0,0.05)' }}>
+        {budget.incomes.map(r => (
+          <EditableRow key={r.id} row={r} accent={accent}
+            showDueDate={showDueDate} compact={compact}
+            onChange={row => updateRow('incomes', row)}
+            onDelete={id => deleteRow('incomes', id)} />
+        ))}
+        {budget.incomes.length === 0 && <EmptyHint label="収入を追加" />}
+      </div>
+
+      <div style={{ height: 40 }}></div>
+    </div>
+  );
+}
+
+function EmptyHint({ label }) {
+  return (
+    <div style={{ padding: 18, textAlign: 'center', color: '#aaa', fontSize: 13 }}>
+      {label}
+    </div>
+  );
+}
+
+Object.assign(window, { BudgetScreen });
+</script>

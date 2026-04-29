@@ -1,0 +1,31 @@
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #ecebe6;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: #1a1a1a;
+  }
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  #root {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    height: 100vh;
+    height: 100dvh;
+    background: #fafaf7;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 32px rgba(0, 0, 0, 0.06);
+  }
+  @media (max-width: 480px) {
+    #root { box-shadow: none; }
+  }
+  * { -webkit-tap-highlight-color: transparent; }
+  input, button, textarea { font-family: inherit; }
+  input:focus { border-color: rgba(0, 0, 0, 0.25) !important; }
+</style>

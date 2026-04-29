@@ -1,0 +1,262 @@
+<script type="text/babel">
+// app — main shell: month tabs + screen switching + persistence
+
+const ACCENT = '#c8941d';
+const SHOW_DUE_DATE = true;
+const COMPACT = false;
+
+function MonthTabs({ months, current, onChange, onAdd, accent }) {
+  const scrollRef = React.useRef(null);
+
+  React.useEffect(() => {
+    const el = scrollRef.current?.querySelector(`[data-month="${current}"]`);
+    if (!el) return;
+    if (el.scrollIntoViewIfNeeded) el.scrollIntoViewIfNeeded();
+    else {
+      const parent = scrollRef.current;
+      const r1 = el.getBoundingClientRect();
+      const r2 = parent.getBoundingClientRect();
+      if (r1.left < r2.left || r1.right > r2.right) {
+        parent.scrollLeft += (r1.left - r2.left) - (r2.width / 2 - r1.width / 2);
+      }
+    }
+  }, [current]);
+
+  return (
+    <div ref={scrollRef} style={{
+      display: 'flex', gap: 4, overflowX: 'auto', overflowY: 'hidden',
+      padding: '4px 14px 10px', scrollbarWidth: 'none',
+      WebkitOverflowScrolling: 'touch',
+    }}>
+      <style>{`div::-webkit-scrollbar{display:none}`}</style>
+      {months.map(m => {
+        const active = m === current;
+        return (
+          <button
+            key={m}
+            data-month={m}
+            onClick={() => onChange(m)}
+            style={{
+              all: 'unset', cursor: 'pointer', flexShrink: 0,
+              padding: '8px 14px', fontSize: 13.5,
+              fontWeight: active ? 600 : 500,
+              color: active ? '#fff' : '#666',
+              background: active ? '#1a1a1a' : 'transparent',
+              borderRadius: 999,
+              transition: 'all 160ms ease',
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+            {monthShort(m)}
+          </button>
+        );
+      })}
+      <button
+        onClick={onAdd}
+        aria-label="月を追加"
+        style={{
+          all: 'unset', cursor: 'pointer', flexShrink: 0,
+          padding: '8px 12px', fontSize: 13.5, fontWeight: 500,
+          color: accent,
+          borderRadius: 999,
+          border: `1px dashed ${accent}55`,
+        }}>
+        + 月を追加
+      </button>
+    </div>
+  );
+}
+
+function ViewSwitch({ value, onChange }) {
+  const opts = [
+    { id: 'budget', label: '家計簿' },
+    { id: 'analytics', label: '分析' },
+  ];
+  return (
+    <div style={{
+      margin: '0 14px 8px',
+      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0,
+      background: '#f1efe9', borderRadius: 10, padding: 3,
+    }}>
+      {opts.map(o => {
+        const active = o.id === value;
+        return (
+          <button key={o.id} onClick={() => onChange(o.id)} style={{
+            all: 'unset', cursor: 'pointer', textAlign: 'center',
+            padding: '7px 0', fontSize: 13, fontWeight: 600,
+            color: active ? '#1a1a1a' : '#888',
+            background: active ? '#fff' : 'transparent',
+            borderRadius: 8,
+            boxShadow: active ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+            transition: 'all 160ms ease',
+          }}>{o.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function pickInitialMonth(budgets) {
+  const months = sortedMonthKeys(budgets);
+  const cur = currentMonthKey();
+  if (budgets[cur]) return cur;
+  return months[months.length - 1] || cur;
+}
+
+function App() {
+  const [budgets, setBudgets] = React.useState(INITIAL_BUDGETS);
+  const [hydrated, setHydrated] = React.useState(false);
+  const [currentMonth, setCurrentMonth] = React.useState(() => pickInitialMonth(INITIAL_BUDGETS));
+  const [view, setView] = React.useState('budget');
+  const [voiceOpen, setVoiceOpen] = React.useState(false);
+  const [saveStatus, setSaveStatus] = React.useState('idle'); // idle | saving | saved | error
+  const saveTimerRef = React.useRef(null);
+
+  // 初回ロード
+  React.useEffect(() => {
+    let cancelled = false;
+    MyBudgetStorage.load().then((data) => {
+      if (cancelled) return;
+      if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+        setBudgets(data);
+        setCurrentMonth(pickInitialMonth(data));
+      }
+      setHydrated(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // 変更を debounce して保存
+  React.useEffect(() => {
+    if (!hydrated) return;
+    setSaveStatus('saving');
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      MyBudgetStorage.save(budgets).then((ok) => {
+        setSaveStatus(ok ? 'saved' : 'error');
+        if (ok) setTimeout(() => setSaveStatus('idle'), 1400);
+      });
+    }, 600);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [budgets, hydrated]);
+
+  const months = sortedMonthKeys(budgets);
+
+  const handleAddMonth = () => {
+    const last = months[months.length - 1];
+    const next = nextMonthKey(last);
+    if (budgets[next]) { setCurrentMonth(next); return; }
+    const template = budgets[last];
+    setBudgets({
+      ...budgets,
+      [next]: {
+        expenses: template.expenses.map(r => ({ ...r, amount: 0 })),
+        incomes: template.incomes.map(r => ({ ...r, amount: 0 })),
+      },
+    });
+    setCurrentMonth(next);
+  };
+
+  const updateBudget = (newBudget) => {
+    setBudgets({ ...budgets, [currentMonth]: newBudget });
+  };
+
+  const handleVoiceAdd = (kind, item) => {
+    const cur = budgets[currentMonth];
+    const id = (kind === 'incomes' ? 'i_' : 'e_') + Date.now();
+    const newRow = { id, name: item.name, amount: item.amount, due: item.due };
+    updateBudget({ ...cur, [kind]: [...cur[kind], newRow] });
+  };
+
+  const handleReset = () => {
+    if (!confirm('編集内容を破棄してサンプルデータに戻しますか？')) return;
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {}).resetBudgets();
+    }
+    try { localStorage.removeItem('mybudget_v1'); } catch (e) {}
+    setBudgets(INITIAL_BUDGETS);
+    setCurrentMonth(pickInitialMonth(INITIAL_BUDGETS));
+  };
+
+  return (
+    <div style={{
+      height: '100%',
+      display: 'flex', flexDirection: 'column',
+      background: '#fafaf7',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        background: '#fafaf7',
+        borderBottom: '0.5px solid rgba(0,0,0,0.06)',
+        paddingTop: 'calc(env(safe-area-inset-top) + 12px)',
+      }}>
+        <div style={{ padding: '4px 18px 2px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: '#888', letterSpacing: 1.6, fontWeight: 600 }}>🍀 MYBUDGET</div>
+            <div style={{ fontSize: 21, fontWeight: 400, color: '#1a1a1a', marginTop: 1, letterSpacing: -0.4 }}>
+              {monthLabel(currentMonth)}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10.5, color: '#aaa', fontVariantNumeric: 'tabular-nums' }}>
+              {months.length}ヶ月のデータ
+            </div>
+            <div style={{ fontSize: 10, color: '#bbb', marginTop: 2, height: 12 }}>
+              {saveStatus === 'saving' && '保存中…'}
+              {saveStatus === 'saved' && '✓ 保存済み'}
+              {saveStatus === 'error' && '⚠ 保存失敗'}
+            </div>
+          </div>
+        </div>
+        <ViewSwitch value={view} onChange={setView} />
+        <MonthTabs months={months} current={currentMonth} onChange={setCurrentMonth} onAdd={handleAddMonth} accent={ACCENT} />
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', WebkitOverflowScrolling: 'touch', position: 'relative' }}>
+        {budgets[currentMonth] && (view === 'budget' ? (
+          <BudgetScreen
+            budget={budgets[currentMonth]}
+            onUpdate={updateBudget}
+            accent={ACCENT}
+            showDueDate={SHOW_DUE_DATE}
+            compact={COMPACT}
+          />
+        ) : (
+          <AnalyticsScreen budgets={budgets} currentMonth={currentMonth} />
+        ))}
+        {view === 'budget' && (
+          <div style={{ padding: '0 18px 24px', textAlign: 'center' }}>
+            <button onClick={handleReset} style={{
+              all: 'unset', cursor: 'pointer', fontSize: 11, color: '#bbb',
+              padding: '6px 12px', borderRadius: 8,
+            }}>サンプルデータに戻す</button>
+          </div>
+        )}
+      </div>
+
+      {view === 'budget' && (
+        <button onClick={() => setVoiceOpen(true)} aria-label="音声で追加" style={{
+          all: 'unset', cursor: 'pointer',
+          position: 'absolute',
+          right: 18,
+          bottom: 'calc(env(safe-area-inset-bottom) + 24px)',
+          zIndex: 50,
+          width: 56, height: 56, borderRadius: 999,
+          background: '#1a1a1a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.22), 0 2px 4px rgba(0,0,0,0.12)',
+        }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="3" width="6" height="12" rx="3" fill="#fff"/>
+            <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+          </svg>
+        </button>
+      )}
+
+      <VoiceInputModal open={voiceOpen} onClose={() => setVoiceOpen(false)} onAdd={handleVoiceAdd} accent={ACCENT} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>

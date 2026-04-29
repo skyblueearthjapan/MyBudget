@@ -1,0 +1,227 @@
+<script type="text/babel">
+// analytics — 月次比較・推移分析
+
+function StatTile({ label, value, sub, color }) {
+  return (
+    <div style={{
+      flex: 1, background: '#fff', borderRadius: 14,
+      padding: '14px 14px 12px',
+      border: '0.5px solid rgba(0,0,0,0.05)',
+      minWidth: 0,
+    }}>
+      <div style={{ fontSize: 10.5, color: '#888', letterSpacing: 1.2, fontWeight: 600, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{
+        marginTop: 6, fontSize: 20, fontWeight: 400,
+        color: color || '#1a1a1a', letterSpacing: -0.5,
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}>{value}</div>
+      {sub && <div style={{ marginTop: 2, fontSize: 11, color: '#999' }}>{sub}</div>}
+    </div>
+  );
+}
+
+function TrendChart({ months, budgets }) {
+  const W = 339, H = 180, PAD_L = 40, PAD_R = 14, PAD_T = 14, PAD_B = 26;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+
+  const points = months.map(m => {
+    const b = budgets[m];
+    const inc = sumAmounts(b.incomes);
+    const exp = sumAmounts(b.expenses);
+    return { m, inc, exp, bal: inc - exp };
+  });
+
+  const maxVal = Math.max(1, ...points.flatMap(p => [p.inc, p.exp]));
+  const minVal = Math.min(0, ...points.map(p => p.bal));
+  const range = maxVal - minVal || 1;
+
+  const x = (i) => PAD_L + (points.length === 1 ? innerW / 2 : (innerW * i) / (points.length - 1));
+  const y = (v) => PAD_T + innerH - ((v - minVal) / range) * innerH;
+  const zeroY = y(0);
+
+  const pathFor = (key) => points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p[key])}`).join(' ');
+
+  const ticks = [];
+  const niceMax = Math.ceil(maxVal / 200000) * 200000;
+  for (let v = 0; v <= niceMax; v += 200000) ticks.push(v);
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 14, padding: '14px 4px 6px 4px', border: '0.5px solid rgba(0,0,0,0.05)' }}>
+      <div style={{ padding: '0 14px 8px', display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>収支推移</div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 10.5, color: '#666' }}>
+          <Legend color="#2d6a4f" label="収入" />
+          <Legend color="#c0392b" label="支出" />
+          <Legend color="#1a1a1a" label="収支" dashed />
+        </div>
+      </div>
+      <svg width={W} height={H} style={{ display: 'block', maxWidth: '100%' }}>
+        {ticks.map(t => (
+          <g key={t}>
+            <line x1={PAD_L} x2={W - PAD_R} y1={y(t)} y2={y(t)} stroke="rgba(0,0,0,0.06)" />
+            <text x={PAD_L - 6} y={y(t) + 3} textAnchor="end" fontSize="9" fill="#999"
+              fontFamily="-apple-system, system-ui">
+              {t === 0 ? '0' : `${t / 10000}万`}
+            </text>
+          </g>
+        ))}
+        {minVal < 0 && (
+          <line x1={PAD_L} x2={W - PAD_R} y1={zeroY} y2={zeroY} stroke="rgba(0,0,0,0.18)" strokeDasharray="2 3" />
+        )}
+        <path d={pathFor('inc')} fill="none" stroke="#2d6a4f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={pathFor('exp')} fill="none" stroke="#c0392b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={pathFor('bal')} fill="none" stroke="#1a1a1a" strokeWidth="1.5" strokeDasharray="3 3" strokeLinecap="round" />
+        {points.map((p, i) => (
+          <g key={p.m}>
+            <circle cx={x(i)} cy={y(p.inc)} r="3" fill="#fff" stroke="#2d6a4f" strokeWidth="1.6" />
+            <circle cx={x(i)} cy={y(p.exp)} r="3" fill="#fff" stroke="#c0392b" strokeWidth="1.6" />
+            <circle cx={x(i)} cy={y(p.bal)} r="2.5" fill="#1a1a1a" />
+            <text x={x(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#666"
+              fontFamily="-apple-system, system-ui">{monthShort(p.m)}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function Legend({ color, label, dashed }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      <span style={{
+        width: 14, height: 2, background: dashed ? 'transparent' : color,
+        borderTop: dashed ? `1.5px dashed ${color}` : 'none',
+      }}></span>
+      {label}
+    </span>
+  );
+}
+
+function MonthBars({ months, budgets }) {
+  const data = months.map(m => {
+    const b = budgets[m];
+    return { m, inc: sumAmounts(b.incomes), exp: sumAmounts(b.expenses) };
+  });
+  const maxVal = Math.max(1, ...data.flatMap(d => [d.inc, d.exp]));
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 14, padding: '16px 16px 12px', border: '0.5px solid rgba(0,0,0,0.05)' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 12 }}>月別比較</div>
+      <div style={{ display: 'grid', gap: 14 }}>
+        {data.map(d => {
+          const balance = d.inc - d.exp;
+          return (
+            <div key={d.m}>
+              <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: '#1a1a1a', width: 40 }}>{monthShort(d.m)}</div>
+                <div style={{ flex: 1 }}></div>
+                <div style={{
+                  fontSize: 11, color: balance < 0 ? '#c0392b' : '#2d6a4f',
+                  fontVariantNumeric: 'tabular-nums', fontWeight: 500,
+                }}>{formatYenSigned(balance)}</div>
+              </div>
+              <div style={{ display: 'grid', gap: 4 }}>
+                <BarRow label="収入" value={d.inc} max={maxVal} color="#2d6a4f" />
+                <BarRow label="支出" value={d.exp} max={maxVal} color="#c0392b" />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BarRow({ label, value, max, color }) {
+  const pct = (value / max) * 100;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ width: 28, fontSize: 10, color: '#999' }}>{label}</div>
+      <div style={{ flex: 1, height: 8, background: '#f4f2ec', borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 400ms ease' }}></div>
+      </div>
+      <div style={{
+        fontSize: 11, color: '#666', width: 60, textAlign: 'right',
+        fontVariantNumeric: 'tabular-nums',
+      }}>{formatYen(value)}</div>
+    </div>
+  );
+}
+
+function TopExpenses({ budget }) {
+  const sorted = [...budget.expenses].sort((a, b) => b.amount - a.amount).slice(0, 5);
+  const max = sorted[0]?.amount || 1;
+  const total = sumAmounts(budget.expenses) || 1;
+  return (
+    <div style={{ background: '#fff', borderRadius: 14, padding: '16px 16px 14px', border: '0.5px solid rgba(0,0,0,0.05)' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 12 }}>支出トップ5</div>
+      <div style={{ display: 'grid', gap: 10 }}>
+        {sorted.map((r, i) => (
+          <div key={r.id}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <div style={{ fontSize: 11, color: '#999', width: 14, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
+              <div style={{ flex: 1, fontSize: 13, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name || '名称未設定'}</div>
+              <div style={{ fontSize: 12, color: '#666', fontVariantNumeric: 'tabular-nums' }}>
+                {((r.amount / total) * 100).toFixed(1)}%
+              </div>
+              <div style={{ fontSize: 13, color: '#1a1a1a', fontVariantNumeric: 'tabular-nums', fontWeight: 500, width: 80, textAlign: 'right' }}>
+                {formatYen(r.amount)}
+              </div>
+            </div>
+            <div style={{ marginLeft: 22, marginTop: 5, height: 4, background: '#f4f2ec', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ width: `${(r.amount / max) * 100}%`, height: '100%', background: '#1a1a1a', borderRadius: 2 }}></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsScreen({ budgets, currentMonth }) {
+  const months = sortedMonthKeys(budgets);
+  const cur = budgets[currentMonth];
+  const curIdx = months.indexOf(currentMonth);
+  const prev = curIdx > 0 ? budgets[months[curIdx - 1]] : null;
+
+  const curInc = sumAmounts(cur.incomes);
+  const curExp = sumAmounts(cur.expenses);
+  const curBal = curInc - curExp;
+  const savingRate = curInc > 0 ? (curBal / curInc) * 100 : 0;
+
+  const expChange = prev ? curExp - sumAmounts(prev.expenses) : 0;
+  const incChange = prev ? curInc - sumAmounts(prev.incomes) : 0;
+
+  return (
+    <div style={{ padding: '16px 18px 100px', display: 'grid', gap: 14 }}>
+      <div>
+        <div style={{ fontSize: 11, color: '#888', letterSpacing: 1.4, fontWeight: 600 }}>分析対象</div>
+        <div style={{ fontSize: 22, fontWeight: 400, color: '#1a1a1a', marginTop: 2, letterSpacing: -0.5 }}>
+          {monthLabel(currentMonth)}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <StatTile label="収支" value={formatYenSigned(curBal)} color={curBal < 0 ? '#c0392b' : '#2d6a4f'} sub={curBal < 0 ? '赤字' : '黒字'} />
+        <StatTile label="貯蓄率" value={savingRate.toFixed(1) + '%'} sub={curInc > 0 ? `収入の${savingRate.toFixed(0)}%` : '—'} />
+      </div>
+      {prev && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <StatTile label="支出 前月比" value={formatYenSigned(expChange)} color={expChange > 0 ? '#c0392b' : '#2d6a4f'}
+            sub={`${monthShort(months[curIdx - 1])} → ${monthShort(currentMonth)}`} />
+          <StatTile label="収入 前月比" value={formatYenSigned(incChange)} color={incChange < 0 ? '#c0392b' : '#2d6a4f'}
+            sub={`${monthShort(months[curIdx - 1])} → ${monthShort(currentMonth)}`} />
+        </div>
+      )}
+
+      <TrendChart months={months} budgets={budgets} />
+      <MonthBars months={months} budgets={budgets} />
+      <TopExpenses budget={cur} />
+    </div>
+  );
+}
+
+Object.assign(window, { AnalyticsScreen });
+</script>
