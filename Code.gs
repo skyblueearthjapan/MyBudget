@@ -76,7 +76,9 @@ function resetBudgets() {
 //   または
 //   2. エディタで `setGeminiApiKey('your-key')` を一度実行
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+// 既定は flash-lite (無料枠 RPD/RPM が大きい)。スクリプトプロパティ
+// `GEMINI_MODEL` をセットすれば任意モデルに切替可能 (例: gemini-2.5-flash, gemini-2.0-flash)。
+const GEMINI_MODEL_DEFAULT = 'gemini-2.5-flash-lite';
 
 function setGeminiApiKey(key) {
   if (!key || typeof key !== 'string') throw new Error('setGeminiApiKey: key required');
@@ -86,6 +88,10 @@ function setGeminiApiKey(key) {
 
 function getGeminiApiKey_() {
   return PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+}
+
+function getGeminiModel_() {
+  return PropertiesService.getScriptProperties().getProperty('GEMINI_MODEL') || GEMINI_MODEL_DEFAULT;
 }
 
 function analyzeUtterance(payload) {
@@ -147,21 +153,33 @@ function analyzeUtterance(payload) {
   };
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
-              GEMINI_MODEL + ':generateContent?key=' + encodeURIComponent(apiKey);
+              getGeminiModel_() + ':generateContent?key=' + encodeURIComponent(apiKey);
+  const opts = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  };
+
   let res;
   try {
-    res = UrlFetchApp.fetch(url, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(body),
-      muteHttpExceptions: true
-    });
+    res = UrlFetchApp.fetch(url, opts);
   } catch (e) {
     return { error: 'FETCH_FAILED', detail: String(e).substring(0, 300) };
   }
 
+  // 429 (レート上限) は 1 度だけ短いバックオフでリトライ
+  if (res.getResponseCode() === 429) {
+    Utilities.sleep(1500);
+    try { res = UrlFetchApp.fetch(url, opts); }
+    catch (e) { return { error: 'FETCH_FAILED', detail: String(e).substring(0, 300) }; }
+  }
+
   const code = res.getResponseCode();
   const text = res.getContentText();
+  if (code === 429) {
+    return { error: 'RATE_LIMIT', status: code, detail: text.substring(0, 400) };
+  }
   if (code !== 200) {
     return { error: 'API_ERROR', status: code, detail: text.substring(0, 400) };
   }

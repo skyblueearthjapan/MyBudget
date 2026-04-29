@@ -253,8 +253,10 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
         if (!res || res.error) {
           const code = res && res.error;
           let msg = 'AI 解析失敗 — ローカル解析';
-          if (code === 'API_KEY_MISSING') msg = 'Gemini API キー未設定 — ローカル解析';
-          else if (code === 'API_ERROR')  msg = 'Gemini API エラー — ローカル解析';
+          if (code === 'API_KEY_MISSING')   msg = 'Gemini API キー未設定 — ローカル解析';
+          else if (code === 'RATE_LIMIT')   msg = 'Gemini クォータ超過 — ローカル解析';
+          else if (code === 'API_ERROR')    msg = `Gemini API エラー (${res.status || '?'}) — ローカル解析`;
+          else if (code === 'FETCH_FAILED') msg = 'Gemini 通信失敗 — ローカル解析';
           fallbackLocal(text, msg);
           return;
         }

@@ -79,7 +79,13 @@ const COMPACT = false;      // コンパクト表示
 
 または、エディタ上で `setGeminiApiKey('your-key-here')` 関数を一度だけ実行しても OK。
 
-モデルは `gemini-2.5-flash` 固定（`Code.gs` の `GEMINI_MODEL` で変更可）。
+既定モデルは `gemini-2.5-flash-lite`（無料枠の RPD/RPM が大きく、この用途には十分）。
+別モデルを使いたい場合は同じスクリプトプロパティ画面で **キー: `GEMINI_MODEL`** /
+**値: `gemini-2.5-flash`** などを追加（プロパティが無ければ既定値）。
+
+429 (Resource exhausted) が返った場合は 1.5s 待って 1 度だけ自動リトライ。
+それでも超過なら正規表現フォールバックに切り替わり、モーダルに
+「Gemini クォータ超過 — ローカル解析」と表示します。
 
 ## データ永続化について
 
