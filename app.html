@@ -160,8 +160,15 @@ function App() {
     setBudgets({ ...budgets, [currentMonth]: newBudget });
   };
 
-  const handleVoiceAdd = (kind, item) => {
+  const handleVoiceAdd = (kind, item, matchedItemId) => {
     const cur = budgets[currentMonth];
+    if (matchedItemId) {
+      const list = cur[kind].map(r => r.id === matchedItemId
+        ? { ...r, amount: item.amount, due: item.due || r.due }
+        : r);
+      updateBudget({ ...cur, [kind]: list });
+      return;
+    }
     const id = (kind === 'incomes' ? 'i_' : 'e_') + Date.now();
     const newRow = { id, name: item.name, amount: item.amount, due: item.due };
     updateBudget({ ...cur, [kind]: [...cur[kind], newRow] });
@@ -253,7 +260,13 @@ function App() {
         </button>
       )}
 
-      <VoiceInputModal open={voiceOpen} onClose={() => setVoiceOpen(false)} onAdd={handleVoiceAdd} accent={ACCENT} />
+      <VoiceInputModal
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        onAdd={handleVoiceAdd}
+        accent={ACCENT}
+        budget={budgets[currentMonth]}
+      />
     </div>
   );
 }

@@ -196,25 +196,88 @@ Object.assign(window, {
 });
 </script>
 <script type="text/babel">
-// voice — 音声入力モーダル (Web Speech API + フォールバック)
+// voice — 音声入力モーダル (Web Speech API → Gemini AI 解析 → ローカル正規表現フォールバック)
 
-function VoiceInputModal({ open, onClose, onAdd, accent }) {
+function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
   const [listening, setListening] = React.useState(false);
   const [transcript, setTranscript] = React.useState('');
+  const [analyzing, setAnalyzing] = React.useState(false);
   const [parsed, setParsed] = React.useState(null);
-  const [kind, setKind] = React.useState('expenses');
+  const [kind, setKind] = React.useState('expenses'); // 'expenses' or 'incomes'
+  const [matchedItem, setMatchedItem] = React.useState(null); // { id, name, amount } or null
+  const [aiNotice, setAiNotice] = React.useState('');
   const recogRef = React.useRef(null);
   const supported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  const hasGAS = typeof google !== 'undefined' && google.script && google.script.run;
 
   React.useEffect(() => {
     if (!open) {
       setListening(false); setTranscript(''); setParsed(null);
+      setAnalyzing(false); setMatchedItem(null); setAiNotice('');
       if (recogRef.current) try { recogRef.current.stop(); } catch (e) {}
     }
   }, [open]);
 
+  const findItem = (k, id) => {
+    if (!budget || !id) return null;
+    const list = budget[k] || [];
+    return list.find(r => r.id === id) || null;
+  };
+
+  const fallbackLocal = (text, note) => {
+    const p = parseUtterance(text);
+    setParsed(p);
+    setMatchedItem(null);
+    if (note) setAiNotice(note);
+  };
+
+  const analyze = (text) => {
+    if (!text) return;
+    setAnalyzing(true);
+    setAiNotice('');
+    setParsed(null);
+    setMatchedItem(null);
+
+    if (!hasGAS) {
+      setAnalyzing(false);
+      fallbackLocal(text, 'ローカル解析モード');
+      return;
+    }
+
+    const expenses = (budget && budget.expenses) || [];
+    const incomes  = (budget && budget.incomes)  || [];
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        setAnalyzing(false);
+        if (!res || res.error) {
+          const code = res && res.error;
+          let msg = 'AI 解析失敗 — ローカル解析';
+          if (code === 'API_KEY_MISSING') msg = 'Gemini API キー未設定 — ローカル解析';
+          else if (code === 'API_ERROR')  msg = 'Gemini API エラー — ローカル解析';
+          fallbackLocal(text, msg);
+          return;
+        }
+        const targetKind = res.kind === 'income' ? 'incomes' : 'expenses';
+        setKind(targetKind);
+        const matched = res.matchedItemId ? findItem(targetKind, res.matchedItemId) : null;
+        setMatchedItem(matched);
+        setParsed({
+          name: matched ? matched.name : (res.name || '名称未設定'),
+          amount: res.amount || 0,
+          due: res.due || ''
+        });
+        setAiNotice(matched ? '✨ 既存項目に一致' : '✨ 新規項目');
+      })
+      .withFailureHandler(() => {
+        setAnalyzing(false);
+        fallbackLocal(text, 'AI 通信失敗 — ローカル解析');
+      })
+      .analyzeUtterance({ text, expenses, incomes });
+  };
+
   const start = () => {
-    setTranscript(''); setParsed(null);
+    setTranscript(''); setParsed(null); setMatchedItem(null); setAiNotice('');
     if (!supported) {
       setListening(true);
       const samples = [
@@ -232,7 +295,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
           clearInterval(tick);
           setListening(false);
           setTranscript(pick);
-          setParsed(parseUtterance(pick));
+          analyze(pick);
         }
       }, 180);
       return;
@@ -247,8 +310,8 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
       for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
       setTranscript(txt);
       if (e.results[e.results.length - 1].isFinal) {
-        setParsed(parseUtterance(txt));
         setListening(false);
+        analyze(txt);
       }
     };
     r.onerror = () => setListening(false);
@@ -261,12 +324,12 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
   const stop = () => {
     if (recogRef.current) try { recogRef.current.stop(); } catch (e) {}
     setListening(false);
-    if (transcript) setParsed(parseUtterance(transcript));
+    if (transcript) analyze(transcript);
   };
 
   const confirm = () => {
     if (!parsed) return;
-    onAdd(kind, { name: parsed.name, amount: parsed.amount, due: parsed.due || '' });
+    onAdd(kind, { name: parsed.name, amount: parsed.amount, due: parsed.due || '' }, matchedItem ? matchedItem.id : '');
     onClose();
   };
 
@@ -282,11 +345,13 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
         width: '100%', background: '#fafaf7',
         borderTopLeftRadius: 24, borderTopRightRadius: 24,
         padding: '14px 18px calc(28px + env(safe-area-inset-bottom))',
-        boxSizing: 'border-box',
+        boxSizing: 'border-box', maxHeight: '90%',
+        overflowY: 'auto',
         animation: 'slideUp 240ms cubic-bezier(0.2, 0.8, 0.2, 1)',
       }}>
         <style>{`@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-          @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }`}</style>
+          @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
+          @keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
         <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.15)', margin: '0 auto 12px' }}></div>
 
@@ -295,7 +360,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
           <button onClick={onClose} style={{ all: 'unset', cursor: 'pointer', color: '#888', fontSize: 14 }}>閉じる</button>
         </div>
         <div style={{ fontSize: 11.5, color: '#888', marginBottom: 14 }}>
-          例：「楽天カード 12000円」「コンビニ 580円 4月15日」
+          AI が支出/収入と既存項目の一致を判定します。例：「楽天カードに 12000円」「コンビニ 580円」
         </div>
 
         <div style={{
@@ -305,7 +370,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
           {[{id: 'expenses', label: '💸 支出'}, {id: 'incomes', label: '💰 収入'}].map(o => {
             const active = o.id === kind;
             return (
-              <button key={o.id} onClick={() => setKind(o.id)} style={{
+              <button key={o.id} onClick={() => { setKind(o.id); setMatchedItem(null); }} style={{
                 all: 'unset', cursor: 'pointer', textAlign: 'center',
                 padding: '8px 0', fontSize: 13, fontWeight: 600,
                 color: active ? '#1a1a1a' : '#888',
@@ -324,32 +389,65 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
           {transcript || (listening ? '聞いています…' : 'マイクをタップして話してください')}
         </div>
 
-        {parsed && (
+        {analyzing && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '12px 16px', marginBottom: 12,
+            background: '#fff', borderRadius: 12, border: '0.5px solid rgba(0,0,0,0.06)',
+            fontSize: 13, color: '#666',
+          }}>
+            <div style={{
+              width: 14, height: 14, borderRadius: '50%',
+              border: '2px solid rgba(0,0,0,0.1)', borderTopColor: accent,
+              animation: 'spin 0.8s linear infinite',
+            }}></div>
+            AI で分析中…
+          </div>
+        )}
+
+        {parsed && !analyzing && (
           <div style={{
             background: '#fff', borderRadius: 12, padding: '12px 16px',
-            border: `1px solid ${accent}55`, marginBottom: 12,
-            display: 'flex', alignItems: 'center', gap: 10,
+            border: matchedItem ? `1.5px solid ${accent}` : `1px solid ${accent}55`,
+            marginBottom: 12,
           }}>
-            <div style={{ fontSize: 18 }}>{kind === 'incomes' ? '💰' : '💸'}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: '#1a1a1a' }}>{parsed.name}</div>
-              {parsed.due && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>支払日 {parsed.due}</div>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 18 }}>{kind === 'incomes' ? '💰' : '💸'}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: '#1a1a1a',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{parsed.name}</div>
+                {parsed.due && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>支払日 {parsed.due}</div>}
+              </div>
+              <div style={{ fontSize: 17, fontWeight: 500, color: '#1a1a1a', fontVariantNumeric: 'tabular-nums' }}>
+                {formatYen(parsed.amount)}
+              </div>
             </div>
-            <div style={{ fontSize: 17, fontWeight: 500, color: '#1a1a1a', fontVariantNumeric: 'tabular-nums' }}>
-              {formatYen(parsed.amount)}
-            </div>
+            {matchedItem && (
+              <div style={{
+                marginTop: 8, paddingTop: 8, borderTop: '0.5px solid rgba(0,0,0,0.06)',
+                fontSize: 11.5, color: '#888',
+              }}>
+                既存「{matchedItem.name}」({formatYen(matchedItem.amount)}) → {formatYen(parsed.amount)} に上書き
+              </div>
+            )}
+            {aiNotice && (
+              <div style={{ marginTop: matchedItem ? 4 : 8, fontSize: 10.5, color: '#aaa' }}>
+                {aiNotice}
+              </div>
+            )}
           </div>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 0 4px' }}>
-          <button onClick={listening ? stop : start} style={{
-            all: 'unset', cursor: 'pointer',
+          <button onClick={listening ? stop : start} disabled={analyzing} style={{
+            all: 'unset', cursor: analyzing ? 'default' : 'pointer',
             width: 68, height: 68, borderRadius: 999,
-            background: listening ? '#c0392b' : '#1a1a1a',
+            background: listening ? '#c0392b' : (analyzing ? '#888' : '#1a1a1a'),
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: listening ? `0 0 0 8px ${accent}33` : '0 6px 18px rgba(0,0,0,0.18)',
             animation: listening ? 'pulse 1.2s ease-in-out infinite' : 'none',
             transition: 'background 200ms ease',
+            opacity: analyzing ? 0.6 : 1,
           }}>
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
               <rect x="9" y="3" width="6" height="12" rx="3" fill="#fff"/>
@@ -361,14 +459,16 @@ function VoiceInputModal({ open, onClose, onAdd, accent }) {
           {listening ? 'タップで停止' : (supported ? 'タップして話す' : 'デモ：タップでサンプル入力')}
         </div>
 
-        {parsed && (
+        {parsed && !analyzing && (
           <button onClick={confirm} style={{
             all: 'unset', cursor: 'pointer', display: 'block', boxSizing: 'border-box',
             width: '100%', textAlign: 'center', marginTop: 14,
             padding: '13px 0', fontSize: 14.5, fontWeight: 600,
             color: '#fff', background: '#1a1a1a', borderRadius: 12,
           }}>
-            {kind === 'incomes' ? '収入' : '支出'}に追加する
+            {matchedItem
+              ? `「${matchedItem.name}」を ${formatYen(parsed.amount)} に上書き`
+              : (kind === 'incomes' ? '収入に追加' : '支出に追加')}
           </button>
         )}
       </div>
@@ -1057,8 +1157,15 @@ function App() {
     setBudgets({ ...budgets, [currentMonth]: newBudget });
   };
 
-  const handleVoiceAdd = (kind, item) => {
+  const handleVoiceAdd = (kind, item, matchedItemId) => {
     const cur = budgets[currentMonth];
+    if (matchedItemId) {
+      const list = cur[kind].map(r => r.id === matchedItemId
+        ? { ...r, amount: item.amount, due: item.due || r.due }
+        : r);
+      updateBudget({ ...cur, [kind]: list });
+      return;
+    }
     const id = (kind === 'incomes' ? 'i_' : 'e_') + Date.now();
     const newRow = { id, name: item.name, amount: item.amount, due: item.due };
     updateBudget({ ...cur, [kind]: [...cur[kind], newRow] });
@@ -1150,7 +1257,13 @@ function App() {
         </button>
       )}
 
-      <VoiceInputModal open={voiceOpen} onClose={() => setVoiceOpen(false)} onAdd={handleVoiceAdd} accent={ACCENT} />
+      <VoiceInputModal
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        onAdd={handleVoiceAdd}
+        accent={ACCENT}
+        budget={budgets[currentMonth]}
+      />
     </div>
   );
 }

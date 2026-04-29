@@ -66,6 +66,21 @@ const SHOW_DUE_DATE = true; // 支払日を表示
 const COMPACT = false;      // コンパクト表示
 ```
 
+## Gemini API キーの設定（音声入力 AI 解析）
+
+音声入力は Gemini で「支出/収入の判定」「既存項目との一致判定」「金額/支払日の抽出」を行います。
+キー未設定の場合はローカル正規表現にフォールバックします。
+
+設定方法:
+
+1. <https://aistudio.google.com/apikey> で API キーを取得
+2. GAS エディタを開く → 左の「⚙ プロジェクトの設定」
+3. 「スクリプト プロパティ」セクションで **キー: `GEMINI_API_KEY`** / **値: 自分のキー** を追加して保存
+
+または、エディタ上で `setGeminiApiKey('your-key-here')` 関数を一度だけ実行しても OK。
+
+モデルは `gemini-2.5-flash` 固定（`Code.gs` の `GEMINI_MODEL` で変更可）。
+
 ## データ永続化について
 
 GAS の `PropertiesService` (UserProperties) を使用。月単位で別キーに保存しているので
