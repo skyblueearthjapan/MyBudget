@@ -1248,14 +1248,19 @@ function App() {
     updateBudget({ ...cur, [kind]: [...cur[kind], newRow] });
   };
 
-  const handleReset = () => {
-    if (!confirm('編集内容を破棄してサンプルデータに戻しますか？')) return;
-    if (typeof google !== 'undefined' && google.script && google.script.run) {
-      google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {}).resetBudgets();
+  const handleDeleteMonth = () => {
+    if (months.length <= 1) {
+      alert('最後の月は削除できません');
+      return;
     }
-    try { localStorage.removeItem('mybudget_v1'); } catch (e) {}
-    setBudgets(INITIAL_BUDGETS);
-    setCurrentMonth(pickInitialMonth(INITIAL_BUDGETS));
+    if (!confirm(`${monthLabel(currentMonth)} を削除します。よろしいですか？`)) return;
+    const remaining = { ...budgets };
+    delete remaining[currentMonth];
+    const remainingKeys = sortedMonthKeys(remaining);
+    const idx = months.indexOf(currentMonth);
+    const fallback = idx > 0 ? months[idx - 1] : remainingKeys[0];
+    setBudgets(remaining);
+    setCurrentMonth(fallback);
   };
 
   return (
@@ -1305,12 +1310,13 @@ function App() {
         ) : (
           <AnalyticsScreen budgets={budgets} currentMonth={currentMonth} />
         ))}
-        {view === 'budget' && (
+        {view === 'budget' && months.length > 1 && (
           <div style={{ padding: '0 18px 24px', textAlign: 'center' }}>
-            <button onClick={handleReset} style={{
-              all: 'unset', cursor: 'pointer', fontSize: 11, color: '#bbb',
-              padding: '6px 12px', borderRadius: 8,
-            }}>サンプルデータに戻す</button>
+            <button onClick={handleDeleteMonth} style={{
+              all: 'unset', cursor: 'pointer', fontSize: 12, color: '#c0392b',
+              padding: '8px 16px', borderRadius: 999,
+              border: '0.5px solid rgba(192,57,43,0.25)',
+            }}>🗑 {monthLabel(currentMonth)}を削除</button>
           </div>
         )}
       </div>
