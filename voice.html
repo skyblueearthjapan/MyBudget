@@ -90,34 +90,12 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
       .analyzeUtterance({ text, expenses, incomes });
   };
 
-  const runDemo = (note) => {
-    setListening(true);
-    if (note) setAiNotice(note);
-    const samples = [
-      '楽天カード 12000円',
-      'コンビニ 580円',
-      '給料 50万円',
-      'ガソリン代 4500円',
-    ];
-    const pick = samples[Math.floor(Math.random() * samples.length)];
-    let i = 0;
-    const tick = setInterval(() => {
-      i++;
-      setTranscript(pick.slice(0, Math.ceil(pick.length * (i / 8))));
-      if (i >= 8) {
-        clearInterval(tick);
-        setListening(false);
-        setTranscript(pick);
-        analyze(pick);
-      }
-    }, 180);
-  };
-
   const start = () => {
     setTranscript(''); setParsed(null); setMatchedItem(null); setAiNotice('');
 
     if (!supported) {
-      return runDemo('音声認識非対応ブラウザ — デモモード');
+      setAiNotice('このブラウザは音声認識非対応です。下の「直接入力」をご利用ください');
+      return;
     }
 
     const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -125,7 +103,8 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
     try { r = new Rec(); }
     catch (e) {
       console.error('SpeechRecognition ctor failed', e);
-      return runDemo('音声認識初期化失敗 — デモモード');
+      setAiNotice('音声認識を初期化できません。下の「直接入力」をご利用ください');
+      return;
     }
     r.lang = 'ja-JP';
     r.interimResults = true;
@@ -145,14 +124,14 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
       setListening(false);
       const code = e.error || '';
       if (code === 'not-allowed' || code === 'service-not-allowed') {
-        runDemo('マイク権限が拒否されました — デモモード');
+        setAiNotice('マイク権限が拒否されました。ブラウザ設定で許可するか、下の「直接入力」をご利用ください');
       } else if (code === 'no-speech') {
         setAiNotice('音声が検出されませんでした');
       } else if (code === 'audio-capture') {
         setAiNotice('マイクが見つかりません');
       } else if (code === 'network') {
         setAiNotice('音声認識ネットワークエラー');
-      } else if (code) {
+      } else if (code && code !== 'aborted') {
         setAiNotice('音声認識エラー: ' + code);
       }
     };
@@ -163,7 +142,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
       setListening(true); // onstart 待ちが遅い端末向けの楽観更新
     } catch (e) {
       console.error('SpeechRecognition.start() failed', e);
-      runDemo('音声認識起動失敗 (' + (e.message || e) + ') — デモモード');
+      setAiNotice('音声認識を起動できません: ' + (e.message || e) + '。下の「直接入力」をご利用ください');
     }
   };
 
@@ -302,7 +281,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
           </button>
         </div>
         <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#999' }}>
-          {listening ? 'タップで停止' : (supported ? 'タップして話す' : 'デモ：タップでサンプル入力')}
+          {listening ? 'タップで停止' : (supported ? 'タップして話す' : '音声認識非対応 — 直接入力をご利用ください')}
         </div>
 
         <div style={{
