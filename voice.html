@@ -9,6 +9,7 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
   const [kind, setKind] = React.useState('expenses'); // 'expenses' or 'incomes'
   const [matchedItem, setMatchedItem] = React.useState(null); // { id, name, amount } or null
   const [aiNotice, setAiNotice] = React.useState('');
+  const [manualText, setManualText] = React.useState('');
   const recogRef = React.useRef(null);
   const supported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
   const hasGAS = typeof google !== 'undefined' && google.script && google.script.run;
@@ -17,9 +18,17 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
     if (!open) {
       setListening(false); setTranscript(''); setParsed(null);
       setAnalyzing(false); setMatchedItem(null); setAiNotice('');
+      setManualText('');
       if (recogRef.current) try { recogRef.current.stop(); } catch (e) {}
     }
   }, [open]);
+
+  const submitManual = () => {
+    const t = manualText.trim();
+    if (!t) return;
+    setTranscript(t);
+    analyze(t);
+  };
 
   const findItem = (k, id) => {
     if (!budget || !id) return null;
@@ -81,35 +90,47 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
       .analyzeUtterance({ text, expenses, incomes });
   };
 
+  const runDemo = (note) => {
+    setListening(true);
+    if (note) setAiNotice(note);
+    const samples = [
+      '楽天カード 12000円',
+      'コンビニ 580円',
+      '給料 50万円',
+      'ガソリン代 4500円',
+    ];
+    const pick = samples[Math.floor(Math.random() * samples.length)];
+    let i = 0;
+    const tick = setInterval(() => {
+      i++;
+      setTranscript(pick.slice(0, Math.ceil(pick.length * (i / 8))));
+      if (i >= 8) {
+        clearInterval(tick);
+        setListening(false);
+        setTranscript(pick);
+        analyze(pick);
+      }
+    }, 180);
+  };
+
   const start = () => {
     setTranscript(''); setParsed(null); setMatchedItem(null); setAiNotice('');
+
     if (!supported) {
-      setListening(true);
-      const samples = [
-        '楽天カード 12000円',
-        'コンビニ 580円',
-        '給料 50万円',
-        'ガソリン代 4500円',
-      ];
-      const pick = samples[Math.floor(Math.random() * samples.length)];
-      let i = 0;
-      const tick = setInterval(() => {
-        i++;
-        setTranscript(pick.slice(0, Math.ceil(pick.length * (i / 8))));
-        if (i >= 8) {
-          clearInterval(tick);
-          setListening(false);
-          setTranscript(pick);
-          analyze(pick);
-        }
-      }, 180);
-      return;
+      return runDemo('音声認識非対応ブラウザ — デモモード');
     }
+
     const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const r = new Rec();
+    let r;
+    try { r = new Rec(); }
+    catch (e) {
+      console.error('SpeechRecognition ctor failed', e);
+      return runDemo('音声認識初期化失敗 — デモモード');
+    }
     r.lang = 'ja-JP';
     r.interimResults = true;
     r.continuous = false;
+    r.onstart = () => setListening(true);
     r.onresult = (e) => {
       let txt = '';
       for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
@@ -119,11 +140,31 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
         analyze(txt);
       }
     };
-    r.onerror = () => setListening(false);
+    r.onerror = (e) => {
+      console.error('SpeechRecognition error', e.error, e.message);
+      setListening(false);
+      const code = e.error || '';
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        runDemo('マイク権限が拒否されました — デモモード');
+      } else if (code === 'no-speech') {
+        setAiNotice('音声が検出されませんでした');
+      } else if (code === 'audio-capture') {
+        setAiNotice('マイクが見つかりません');
+      } else if (code === 'network') {
+        setAiNotice('音声認識ネットワークエラー');
+      } else if (code) {
+        setAiNotice('音声認識エラー: ' + code);
+      }
+    };
     r.onend = () => setListening(false);
     recogRef.current = r;
-    r.start();
-    setListening(true);
+    try {
+      r.start();
+      setListening(true); // onstart 待ちが遅い端末向けの楽観更新
+    } catch (e) {
+      console.error('SpeechRecognition.start() failed', e);
+      runDemo('音声認識起動失敗 (' + (e.message || e) + ') — デモモード');
+    }
   };
 
   const stop = () => {
@@ -262,6 +303,38 @@ function VoiceInputModal({ open, onClose, onAdd, accent, budget }) {
         </div>
         <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#999' }}>
           {listening ? 'タップで停止' : (supported ? 'タップして話す' : 'デモ：タップでサンプル入力')}
+        </div>
+
+        <div style={{
+          marginTop: 14, paddingTop: 12,
+          borderTop: '0.5px solid rgba(0,0,0,0.06)',
+        }}>
+          <div style={{ fontSize: 10.5, color: '#999', marginBottom: 6, letterSpacing: 0.4 }}>
+            または直接入力
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              value={manualText}
+              onChange={e => setManualText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submitManual(); }}
+              placeholder="例: 楽天カードに 12000円"
+              disabled={analyzing || listening}
+              style={{
+                flex: 1, boxSizing: 'border-box',
+                padding: '10px 12px', fontSize: 14,
+                border: '1px solid rgba(0,0,0,0.1)', borderRadius: 10,
+                background: '#fff', color: '#1a1a1a', outline: 'none',
+                fontFamily: 'inherit',
+              }}
+            />
+            <button onClick={submitManual} disabled={analyzing || listening || !manualText.trim()} style={{
+              all: 'unset', cursor: (analyzing || listening || !manualText.trim()) ? 'default' : 'pointer',
+              padding: '10px 14px', fontSize: 13, fontWeight: 600,
+              color: '#fff', background: accent, borderRadius: 10,
+              opacity: (analyzing || listening || !manualText.trim()) ? 0.4 : 1,
+            }}>解析</button>
+          </div>
         </div>
 
         {parsed && !analyzing && (
