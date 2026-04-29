@@ -1,6 +1,7 @@
 **/**
 !appsscript.json
 !Code.gs
+!HermesAPI.js
 !index.html
 !styles.html
 !data.html
